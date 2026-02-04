@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Kejar Aku</title>
+    <title>Kejar Aku - Labirin Kelam</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; }
         #ui { position: absolute; top: 20px; left: 20px; color: #fff; pointer-events: none; z-index: 10; }
@@ -12,17 +12,48 @@
             border-radius: 5px; overflow: hidden;
         }
         #p-dot, #e-dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; }
-        #p-dot { background: #00ff00; }
-        #e-dot { background: red; }
+        #p-dot { background: #00ff00; box-shadow: 0 0 5px #0f0; }
+        #e-dot { background: red; box-shadow: 0 0 5px red; }
         .wall-ui { position: absolute; background: #222; }
+
+        /* Overlay Screens */
+        .overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center;
+            align-items: center; text-align: center; z-index: 100; color: white;
+        }
+        #start-screen { background: rgba(0,0,0,0.9); }
+        #death-screen { background: rgba(100,0,0,0.8); display: none; }
+        
+        button {
+            padding: 15px 40px; font-size: 20px; cursor: pointer;
+            background: #ff0000; color: white; border: none;
+            border-radius: 5px; font-family: inherit; font-weight: bold;
+            transition: 0.3s; margin-top: 20px;
+        }
+        button:hover { background: #b30000; transform: scale(1.1); }
     </style>
 </head>
 <body>
-    <div id="ui">
-        <h1>MISI: AMBIL 3 INTI (wasd untuk bergerak) </h1>
-        <h2 id="score">INTI: 0/3</h2>
-        <p>Senter (F) | AInya pinter lho Bang</p>
+
+    <div id="start-screen" class="overlay">
+        <h1>KEJAR AKU</h1>
+        <p>Kumpulkan 3 Inti Kuning. Jangan sampai tertangkap.</p>
+        <p style="font-size: 12px; color: #aaa;">Kontrol: WASD untuk gerak | F untuk Senter</p>
+        <button onclick="startGame()">MULAI PERMAINAN</button>
     </div>
+
+    <div id="death-screen" class="overlay">
+        <h1 style="font-size: 50px;">KAMU MATI!</h1>
+        <p>Hantu itu terlalu cepat untukmu.</p>
+        <button onclick="location.reload()">MAIN LAGI</button>
+    </div>
+
+    <div id="ui">
+        <h1>MISI: AMBIL 3 INTI</h1>
+        <h2 id="score">INTI: 0/3</h2>
+    </div>
+
     <div id="minimap"><div id="p-dot"></div><div id="e-dot"></div></div>
 
     <script type="importmap">
@@ -44,6 +75,7 @@
         const walls = [];
         const objectives = [];
         let score = 0;
+        let isDead = false;
 
         const mazeLayout = [
             [1,1,1,1,1,1,1,1,1,1],
@@ -106,10 +138,17 @@
                 pitch = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, pitch)); 
             }
         };
-        window.onmousedown=()=>document.body.requestPointerLock();
+
+        // Fungsi Global untuk Tombol
+        window.startGame = () => {
+            document.getElementById('start-screen').style.display = 'none';
+            document.body.requestPointerLock();
+        };
 
         function animate() {
+            if (isDead) return;
             requestAnimationFrame(animate);
+            
             camera.rotation.set(pitch, yaw, 0, 'YXZ');
             const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
             const sDir = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
@@ -127,33 +166,26 @@
             flashlight.position.copy(camera.position);
             flashlight.target.position.copy(camera.position).add(dir);
 
-            // --- SMART AI MOVEMENTS ---
+            // --- SMART AI ---
             const eSpeed = 0.04 + (score * 0.012);
             let toPlayer = new THREE.Vector3().subVectors(camera.position, enemy.position).normalize();
-            
-            // Coba jalan ke arah player
             let testPos = enemy.position.clone().addScaledVector(toPlayer, eSpeed);
             
             if (!checkCollision(testPos, 0.6)) {
-                // Jika tidak ada halangan, jalan lurus
                 enemy.position.copy(testPos);
             } else {
-                // Jika terhalang, coba lari ke samping (Raycasting sederhana)
-                let leftDir = new THREE.Vector3(-toPlayer.z, 0, toPlayer.x); // Vektor tegak lurus
+                let leftDir = new THREE.Vector3(-toPlayer.z, 0, toPlayer.x);
                 let rightDir = new THREE.Vector3(toPlayer.z, 0, -toPlayer.x);
-                
                 let testLeft = enemy.position.clone().addScaledVector(leftDir, eSpeed);
-                let testRight = enemy.position.clone().addScaledVector(rightDir, eSpeed);
-                
-                if (!checkCollision(testLeft, 0.6)) {
-                    enemy.position.copy(testLeft);
-                } else if (!checkCollision(testRight, 0.6)) {
-                    enemy.position.copy(testRight);
+                if (!checkCollision(testLeft, 0.6)) enemy.position.copy(testLeft);
+                else {
+                    let testRight = enemy.position.clone().addScaledVector(rightDir, eSpeed);
+                    if (!checkCollision(testRight, 0.6)) enemy.position.copy(testRight);
                 }
             }
             eLight.position.copy(enemy.position);
 
-            // Gameplay Logic
+            // Objective Logic
             objectives.forEach((obj, i) => {
                 if(camera.position.distanceTo(obj.position) < 1.5) {
                     scene.remove(obj); objectives.splice(i, 1);
@@ -161,8 +193,15 @@
                     if(score>=3) { alert("MENANG!"); location.reload(); }
                 }
             });
-            if(camera.position.distanceTo(enemy.position) < 1.6) { alert("MATI!"); location.reload(); }
 
+            // Death Logic
+            if(camera.position.distanceTo(enemy.position) < 1.6) {
+                isDead = true;
+                document.exitPointerLock();
+                document.getElementById('death-screen').style.display = 'flex';
+            }
+
+            // Minimap Update
             document.getElementById('p-dot').style.left = (camera.position.x/6*16)+'px';
             document.getElementById('p-dot').style.top = (camera.position.z/6*16)+'px';
             document.getElementById('e-dot').style.left = (enemy.position.x/6*16)+'px';
